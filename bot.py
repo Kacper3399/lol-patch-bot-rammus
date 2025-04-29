@@ -8,7 +8,7 @@ import os
 
 TOKEN = os.getenv("DISCORD_TOKEN")
 CHANNEL_ID = int(os.getenv("CHANNEL_ID"))
-PATCH_URL = 'https://www.leagueoflegends.com/pl-pl/news/tags/patch-notes/'
+PATCH_URL = 'https://www.leagueoflegends.com/en-us/news/tags/patch-notes/'
 
 # Włączanie message_content intent
 intents = discord.Intents.default()
@@ -23,12 +23,7 @@ def extract_patch_summary(patch_url):
     content = soup.find_all(['h2', 'h3', 'p'])
 
     sections = {
-        'Zmiany bohaterów': '**Zmiany bohaterów:**',
         'Champion Changes': '**Champion Changes:**',
-        'Zmiany przedmiotów': '**Zmiany przedmiotów:**',
-        'Item Changes': '**Item Changes:**',
-        'Zmiany run': '**Zmiany run:**',
-        'Rune Changes': '**Rune Changes:**'
     }
 
     summary = []
@@ -42,7 +37,12 @@ def extract_patch_summary(patch_url):
         elif el.name == 'h2':
             collecting = False
         elif collecting and text:
-            summary.append(text)
+            # Skracanie opisów zmian (np. tylko "Q damage increased, W mana cost decreased")
+            lines = text.split('\n')
+            if lines:
+                changes = [line for line in lines if len(line.split(':')) > 1]
+                if changes:
+                    summary.extend(changes)
         if len(''.join(summary)) > 1000:
             break
     return '\n'.join(summary)
@@ -61,11 +61,11 @@ async def fetch_patch_notes():
             summary = extract_patch_summary(patch_url)
             channel = bot.get_channel(CHANNEL_ID)
             if channel:
-                await channel.send(f"**Nowe notki patcha LoL:** {patch_title}\n{patch_url}\n{summary}")
+                await channel.send(f"**New LoL Patch Notes:** {patch_title}\n{patch_url}\n{summary}")
 
 @bot.event
 async def on_ready():
-    print(f"Zalogowano jako {bot.user}")
+    print(f"Logged in as {bot.user}")
     fetch_patch_notes.start()
 
 # Serwer pingujący (by działało 24/7)
@@ -73,7 +73,7 @@ app = Flask('')
 
 @app.route('/')
 def home():
-    return "Bot żyje!", 200
+    return "Bot is alive!", 200
 
 def run_ping():
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))
@@ -89,8 +89,8 @@ async def patch(ctx):
         patch_url = 'https://www.leagueoflegends.com' + patch_link['href']
         patch_title = patch_link.get_text(strip=True)
         summary = extract_patch_summary(patch_url)
-        await ctx.send(f"**Ostatni patch:** {patch_title}\n{patch_url}\n{summary}")
+        await ctx.send(f"**Last Patch:** {patch_title}\n{patch_url}\n{summary}")
     else:
-        await ctx.send("Nie udało się znaleźć najnowszego patcha.")
+        await ctx.send("Couldn't find the latest patch.")
 
 bot.run(TOKEN)
