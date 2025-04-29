@@ -10,7 +10,10 @@ TOKEN = os.getenv("DISCORD_TOKEN")
 CHANNEL_ID = int(os.getenv("CHANNEL_ID"))
 PATCH_URL = 'https://www.leagueoflegends.com/pl-pl/news/tags/patch-notes/'
 
+# Włączanie message_content intent
 intents = discord.Intents.default()
+intents.message_content = True  # <- Dodane, żeby bot miał dostęp do treści wiadomości
+
 bot = commands.Bot(command_prefix='!', intents=intents)
 last_posted_patch = None
 
@@ -89,6 +92,5 @@ async def patch(ctx):
         await ctx.send(f"**Ostatni patch:** {patch_title}\n{patch_url}\n{summary}")
     else:
         await ctx.send("Nie udało się znaleźć najnowszego patcha.")
-
 
 bot.run(TOKEN)
