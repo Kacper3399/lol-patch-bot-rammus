@@ -77,4 +77,18 @@ def run_ping():
 
 Thread(target=run_ping).start()
 
+@bot.command()
+async def patch(ctx):
+    response = requests.get(PATCH_URL)
+    soup = BeautifulSoup(response.text, 'html.parser')
+    patch_link = soup.find('a', href=True, string=lambda s: s and 'Patch' in s)
+    if patch_link:
+        patch_url = 'https://www.leagueoflegends.com' + patch_link['href']
+        patch_title = patch_link.get_text(strip=True)
+        summary = extract_patch_summary(patch_url)
+        await ctx.send(f"**Ostatni patch:** {patch_title}\n{patch_url}\n{summary}")
+    else:
+        await ctx.send("Nie udało się znaleźć najnowszego patcha.")
+
+
 bot.run(TOKEN)
