@@ -37,7 +37,7 @@ def debug_website(url):
         return None
 
 def extract_patch_summary(patch_url):
-    """Funkcja wyciągająca zmiany championów i przedmiotów"""
+    """Ulepszona funkcja do wyciągania zmian championów i przedmiotów"""
     try:
         print(f"\n=== Przetwarzam: {patch_url} ===", file=sys.stderr)
         soup = debug_website(patch_url)
@@ -46,64 +46,52 @@ def extract_patch_summary(patch_url):
 
         champion_changes = []
         item_changes = []
-        
-        # Szukamy sekcji championów
-        champion_section = None
-        champion_headers = ['Champion Changes', 'Champion Updates', 'Champions']
-        for header in champion_headers:
-            champion_section = soup.find(lambda tag: tag.name in ['h2', 'h3'] and 
-                                      header.lower() in tag.get_text().lower())
-            if champion_section:
-                break
-        
-        if champion_section:
-            print(f"Znaleziono sekcję championów: {champion_section.get_text()}", file=sys.stderr)
-            current = champion_section.find_next_sibling()
-            
-            while current and current.name not in ['h2', 'h3']:
-                if current.name in ['h4', 'h5']:
-                    champ_name = current.get_text(strip=True)
-                    champion_changes.append(f"\n**{champ_name}**")
-                elif current.name in ['p', 'li']:
-                    text = current.get_text(' ', strip=True)
-                    if text and not text.startswith(('http', '©')):
-                        champion_changes.append(f"- {text}")
-                elif current.name == 'div' and current.get('class'):
-                    text = current.get_text(' ', strip=True)
-                    if text and len(text) > 10:
-                        champion_changes.append(f"- {text}")
-                
-                current = current.find_next_sibling()
 
-        # Szukamy sekcji przedmiotów
-        item_section = None
-        item_headers = ['Item Changes', 'Item Updates', 'Items']
-        for header in item_headers:
-            item_section = soup.find(lambda tag: tag.name in ['h2', 'h3'] and 
-                                  header.lower() in tag.get_text().lower())
-            if item_section:
-                break
+        # Szukamy wszystkich sekcji z zmianami
+        sections = soup.find_all(['h2', 'h3'])
         
-        if item_section:
-            print(f"Znaleziono sekcję przedmiotów: {item_section.get_text()}", file=sys.stderr)
-            current = item_section.find_next_sibling()
+        for section in sections:
+            section_text = section.get_text(strip=True).lower()
             
-            while current and current.name not in ['h2', 'h3']:
-                if current.name in ['h4', 'h5']:
-                    item_name = current.get_text(strip=True)
-                    item_changes.append(f"\n**{item_name}**")
-                elif current.name in ['p', 'li']:
-                    text = current.get_text(' ', strip=True)
-                    if text and not text.startswith(('http', '©')):
-                        item_changes.append(f"- {text}")
-                elif current.name == 'div' and current.get('class'):
-                    text = current.get_text(' ', strip=True)
-                    if text and len(text) > 10:
-                        item_changes.append(f"- {text}")
+            # Sekcja championów
+            if 'champion' in section_text:
+                print(f"Znaleziono sekcję championów: {section.get_text(strip=True)}", file=sys.stderr)
+                current = section.next_sibling
                 
-                current = current.find_next_sibling()
+                while current and current.name not in ['h2', 'h3']:
+                    if current.name == 'h4':
+                        champ_name = current.get_text(strip=True)
+                        champion_changes.append(f"\n**{champ_name}**")
+                    elif current.name in ['p', 'li']:
+                        text = current.get_text(' ', strip=True)
+                        if text and len(text) > 10 and not any(x in text.lower() for x in ['http', '©']):
+                            champion_changes.append(f"- {text}")
+                    elif current.name == 'div' and current.get('class'):
+                        text = current.get_text(' ', strip=True)
+                        if text and len(text) > 10:
+                            champion_changes.append(f"- {text}")
+                    current = current.next_sibling
 
-        # Łączymy wyniki
+            # Sekcja przedmiotów
+            elif 'item' in section_text:
+                print(f"Znaleziono sekcję przedmiotów: {section.get_text(strip=True)}", file=sys.stderr)
+                current = section.next_sibling
+                
+                while current and current.name not in ['h2', 'h3']:
+                    if current.name == 'h4':
+                        item_name = current.get_text(strip=True)
+                        item_changes.append(f"\n**{item_name}**")
+                    elif current.name in ['p', 'li']:
+                        text = current.get_text(' ', strip=True)
+                        if text and len(text) > 10 and not any(x in text.lower() for x in ['http', '©']):
+                            item_changes.append(f"- {text}")
+                    elif current.name == 'div' and current.get('class'):
+                        text = current.get_text(' ', strip=True)
+                        if text and len(text) > 10:
+                            item_changes.append(f"- {text}")
+                    current = current.next_sibling
+
+        # Formatowanie wyników
         result = []
         if champion_changes:
             result.append("**CHAMPION CHANGES**")
@@ -113,11 +101,11 @@ def extract_patch_summary(patch_url):
             result.append("\n**ITEM CHANGES**")
             result.extend(item_changes)
 
-        return '\n'.join(result) if result else "No champion or item changes found."
+        return '\n'.join(result) if result else "No detailed changes found. Please check the patch notes manually as the website structure may have changed."
 
     except Exception as e:
         print(f"Błąd w extract_patch_summary: {e}", file=sys.stderr)
-        return "Error parsing changes"
+        return "Error parsing changes. Check bot logs for details."
 
 @tasks.loop(hours=24)
 async def fetch_patch_notes():
@@ -160,11 +148,10 @@ async def fetch_patch_notes():
             if channel:
                 message = f"**New LoL Patch Notes:** {patch_title}\n{patch_url}\n{summary}"
                 if len(message) > 2000:
-                    # Dzielimy wiadomość jeśli jest zbyt długa
-                    part1 = message[:2000]
-                    part2 = message[2000:4000]
-                    await channel.send(part1)
-                    await channel.send(part2)
+                    # Dzielimy wiadomość na części
+                    parts = [message[i:i+2000] for i in range(0, len(message), 2000)]
+                    for part in parts:
+                        await channel.send(part)
                 else:
                     await channel.send(message)
     else:
@@ -179,11 +166,11 @@ async def on_ready():
 async def patch(ctx):
     """Ręczne sprawdzenie najnowszych patchnotów"""
     print(f"\n=== Żądanie patchnotów od {ctx.author} ===", file=sys.stderr)
-    await ctx.send("Sprawdzam najnowsze patchnoty...")
+    await ctx.send("🔍 Sprawdzam najnowsze patchnoty...")
     
     soup = debug_website(PATCH_URL)
     if not soup:
-        await ctx.send("Nie udało się pobrać strony z patchnotami.")
+        await ctx.send("❌ Nie udało się pobrać strony z patchnotami.")
         return
     
     patch_link = soup.find('a', string=lambda s: s and 'Patch' in str(s))
@@ -200,14 +187,13 @@ async def patch(ctx):
         
         message = f"**Latest Patch:** {patch_title}\n{patch_url}\n{summary}"
         if len(message) > 2000:
-            part1 = message[:2000]
-            part2 = message[2000:4000]
-            await ctx.send(part1)
-            await ctx.send(part2)
+            parts = [message[i:i+2000] for i in range(0, len(message), 2000)]
+            for part in parts:
+                await ctx.send(part)
         else:
             await ctx.send(message)
     else:
-        await ctx.send("Nie znaleziono najnowszych patchnotów. Struktura strony mogła ulec zmianie.")
+        await ctx.send("❌ Nie znaleziono najnowszych patchnotów. Struktura strony mogła ulec zmianie.")
         print("Struktura HTML strony:", file=sys.stderr)
         print(soup.prettify()[:1000], file=sys.stderr)
 
