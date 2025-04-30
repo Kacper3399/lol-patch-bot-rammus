@@ -37,7 +37,7 @@ def debug_website(url):
         return None
 
 def extract_patch_summary(patch_url):
-    """Ulepszona funkcja do wyciągania zmian z patchnotów"""
+    """Ulepszona funkcja do wyciągania zmian z patchnotów (2025)"""
     try:
         print(f"\n=== Przetwarzam: {patch_url} ===", file=sys.stderr)
         soup = debug_website(patch_url)
@@ -46,28 +46,63 @@ def extract_patch_summary(patch_url):
 
         summary = []
         
-        # Nowa struktura strony (2025)
-        patch_container = soup.find('div', class_='patch-notes__container')
-        if patch_container:
-            print("Znaleziono nowy format patchnotów (2025)", file=sys.stderr)
+        # Szukamy sekcji championów
+        champion_section = None
+        
+        # Metoda 1: Szukamy po nagłówkach
+        for h2 in soup.find_all(['h2', 'h3']):
+            if 'champion' in h2.get_text().lower():
+                champion_section = h2
+                break
+        
+        # Metoda 2: Szukamy po klasach
+        if not champion_section:
+            for div in soup.find_all('div', class_=True):
+                if 'champion' in ' '.join(div['class']).lower():
+                    champion_section = div
+                    break
+        
+        if champion_section:
+            print(f"Znaleziono sekcję championów: {champion_section.get_text()}", file=sys.stderr)
+            summary.append(f"\n**{champion_section.get_text(strip=True)}**")
             
-            # Szukamy sekcji z championami
-            for section in patch_container.find_all('h2', class_='patch-change-title'):
-                if 'Champion' in section.get_text():
-                    summary.append(f"\n**{section.get_text(strip=True)}**")
-                    for change in section.find_next_siblings('div', class_='patch-change'):
-                        summary.append(change.get_text(' ', strip=True)[:150] + "...")
+            # Znajdź wszystkie zmiany w sekcji
+            current = champion_section.find_next()
+            changes_count = 0
+            
+            while current and changes_count < 15:  # Limit 15 zmian
+                if current.name in ['h4', 'h5']:
+                    # Nazwa championa lub umiejętności
+                    champ_name = current.get_text(strip=True)
+                    if len(champ_name) < 50:  # Filtruj zbyt długie teksty
+                        summary.append(f"\n__{champ_name}__")
+                        changes_count += 1
+                elif current.name in ['p', 'li']:
+                    # Szczegóły zmian
+                    text = current.get_text(' ', strip=True)
+                    if 10 < len(text) < 150:  # Filtruj zbyt krótkie/długie
+                        summary.append(f"- {text}")
+                        changes_count += 1
+                elif current.name == 'div' and current.get('class'):
+                    # Zmiany w divach
+                    text = current.get_text(' ', strip=True)
+                    if 'change' in ' '.join(current['class']).lower() and 10 < len(text) < 150:
+                        summary.append(f"- {text}")
+                        changes_count += 1
+                
+                current = current.find_next()
         
-        # Dla starszych formatów
+        # Jeśli nie znaleziono sekcji championów, spróbuj alternatywnej metody
         if not summary:
-            print("Próbuję starszej metody parsowania...", file=sys.stderr)
-            changes = soup.find_all(['h3', 'h4'], string=lambda t: 'Change' in str(t))
-            for change in changes:
-                summary.append(f"\n**{change.get_text()}**")
-                for item in change.find_next_siblings('p', limit=5):
-                    summary.append(item.get_text(' ', strip=True)[:100] + "...")
+            print("Próbuję alternatywnej metody parsowania...", file=sys.stderr)
+            for item in soup.find_all(['h4', 'h5', 'li', 'p']):
+                text = item.get_text(' ', strip=True)
+                if any(word in text.lower() for word in ['buff', 'nerf', 'change', 'adjust', 'update']) and 10 < len(text) < 150:
+                    summary.append(f"- {text}")
+                    if len(summary) >= 10:  # Limit 10 zmian
+                        break
         
-        return '\n'.join(summary[:15]) if summary else "No detailed changes found."
+        return '\n'.join(summary) if summary else "No detailed champion changes found."
 
     except Exception as e:
         print(f"Błąd w extract_patch_summary: {e}", file=sys.stderr)
