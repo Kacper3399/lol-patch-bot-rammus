@@ -37,7 +37,7 @@ def debug_website(url):
         return None
 
 def extract_patch_summary(patch_url):
-    """Funkcja dokładnie wyciągająca szczegóły zmian"""
+    """Specjalna wersja funkcji dostosowana do aktualnej struktury strony"""
     try:
         print(f"\n=== Przetwarzam: {patch_url} ===", file=sys.stderr)
         soup = debug_website(patch_url)
@@ -47,47 +47,55 @@ def extract_patch_summary(patch_url):
         champion_changes = []
         item_changes = []
 
-        # Szukamy wszystkich sekcji z zmianami
-        for section in soup.find_all(['h2', 'h3']):
-            section_text = section.get_text(strip=True).lower()
-            
-            # Sekcja championów
-            if 'champion' in section_text:
-                print(f"Znaleziono sekcję championów: {section.get_text(strip=True)}", file=sys.stderr)
-                current = section.find_next()
-                
-                while current and current.name not in ['h2', 'h3']:
-                    if current.name == 'h4':
-                        champ_name = current.get_text(strip=True)
-                        champion_changes.append(f"\n**{champ_name}**")
-                        # Szukamy zmian dla tego championa
-                        next_node = current.find_next_sibling()
-                        while next_node and next_node.name not in ['h2', 'h3', 'h4']:
-                            if next_node.name in ['p', 'li', 'div']:
-                                text = next_node.get_text(' ', strip=True)
-                                if text and len(text) > 10 and not any(x in text.lower() for x in ['http', '©']):
-                                    champion_changes.append(f"- {text}")
-                            next_node = next_node.find_next_sibling()
-                    current = current.find_next()
+        # Główny kontener z zmianami
+        patch_container = soup.find('div', class_='patch-change-container')
+        if not patch_container:
+            patch_container = soup.find('article')
 
-            # Sekcja przedmiotów
-            elif 'item' in section_text:
-                print(f"Znaleziono sekcję przedmiotów: {section.get_text(strip=True)}", file=sys.stderr)
-                current = section.find_next()
+        if patch_container:
+            # Znajdź wszystkie sekcje
+            sections = patch_container.find_all(['h2', 'h3'], class_=lambda x: not x or 'patch-change-title' in x)
+            
+            for section in sections:
+                section_title = section.get_text(strip=True)
                 
-                while current and current.name not in ['h2', 'h3']:
-                    if current.name == 'h4':
-                        item_name = current.get_text(strip=True)
-                        item_changes.append(f"\n**{item_name}**")
-                        # Szukamy zmian dla tego przedmiotu
-                        next_node = current.find_next_sibling()
-                        while next_node and next_node.name not in ['h2', 'h3', 'h4']:
-                            if next_node.name in ['p', 'li', 'div']:
-                                text = next_node.get_text(' ', strip=True)
-                                if text and len(text) > 10 and not any(x in text.lower() for x in ['http', '©']):
-                                    item_changes.append(f"- {text}")
-                            next_node = next_node.find_next_sibling()
-                    current = current.find_next()
+                # Sekcja championów
+                if 'champion' in section_title.lower():
+                    print(f"Znaleziono sekcję championów: {section_title}", file=sys.stderr)
+                    current = section.find_next_sibling()
+                    
+                    while current and current.name not in ['h2', 'h3']:
+                        if current.name == 'h4':
+                            champ_name = current.get_text(strip=True)
+                            champion_changes.append(f"\n**{champ_name}**")
+                        elif current.name in ['p', 'li']:
+                            text = current.get_text(' ', strip=True)
+                            if text and len(text) > 10 and not any(x in text.lower() for x in ['http', '©']):
+                                champion_changes.append(f"- {text}")
+                        elif current.name == 'div' and 'patch-change' in current.get('class', []):
+                            text = current.get_text(' ', strip=True)
+                            if text and len(text) > 10:
+                                champion_changes.append(f"- {text}")
+                        current = current.find_next_sibling()
+
+                # Sekcja przedmiotów
+                elif 'item' in section_title.lower():
+                    print(f"Znaleziono sekcję przedmiotów: {section_title}", file=sys.stderr)
+                    current = section.find_next_sibling()
+                    
+                    while current and current.name not in ['h2', 'h3']:
+                        if current.name == 'h4':
+                            item_name = current.get_text(strip=True)
+                            item_changes.append(f"\n**{item_name}**")
+                        elif current.name in ['p', 'li']:
+                            text = current.get_text(' ', strip=True)
+                            if text and len(text) > 10 and not any(x in text.lower() for x in ['http', '©']):
+                                item_changes.append(f"- {text}")
+                        elif current.name == 'div' and 'patch-change' in current.get('class', []):
+                            text = current.get_text(' ', strip=True)
+                            if text and len(text) > 10:
+                                item_changes.append(f"- {text}")
+                        current = current.find_next_sibling()
 
         # Formatowanie wyników
         result = []
