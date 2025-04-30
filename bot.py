@@ -5,6 +5,7 @@ from bs4 import BeautifulSoup
 from flask import Flask
 from threading import Thread
 import os
+import sys
 
 TOKEN = os.getenv("DISCORD_TOKEN")
 CHANNEL_ID = int(os.getenv("CHANNEL_ID"))
@@ -19,57 +20,63 @@ last_posted_patch = None
 def debug_website(url):
     """Funkcja do debugowania - pokazuje zawartość strony"""
     try:
-        print("=== Pobieram stronę patchnotów ===")
+        print("=== Pobieram stronę patchnotów ===", file=sys.stderr)
         response = requests.get(url, timeout=10)
         response.raise_for_status()
         
-        print("\n=== Pierwsze 1000 znaków strony ===")
-        print(response.text[:1000])
+        print("\n=== Pierwsze 1000 znaków strony ===", file=sys.stderr)
+        print(response.text[:1000], file=sys.stderr)
         
         soup = BeautifulSoup(response.text, 'html.parser')
-        print("\n=== Sformatowany HTML (pierwsze 1000 znaków) ===")
-        print(soup.prettify()[:1000])
+        print("\n=== Sformatowany HTML (pierwsze 1000 znaków) ===", file=sys.stderr)
+        print(soup.prettify()[:1000], file=sys.stderr)
         
         return soup
     except Exception as e:
-        print(f"Błąd podczas debugowania strony: {e}")
+        print(f"Błąd podczas debugowania strony: {e}", file=sys.stderr)
         return None
 
 def extract_patch_summary(patch_url):
-    """Wyciąga podsumowanie zmian z patchnotów"""
-    print(f"\n=== Próbuję przetworzyć: {patch_url} ===")
-    soup = debug_website(patch_url)  # Używamy naszej funkcji debugującej
-    if not soup:
-        return "Could not fetch patch details."
-    
-    # Próbujemy znaleźć zmiany na kilka sposobów
-    summary = []
-    
-    # Metoda 1: Szukamy sekcji Champion Changes
-    changes_section = soup.find('h2', string='Champion Changes')
-    if changes_section:
-        print("Znaleziono sekcję Champion Changes")
-        for sibling in changes_section.find_next_siblings():
-            if sibling.name == 'h2':
-                break
-            if sibling.get_text(strip=True):
-                summary.append(sibling.get_text(strip=True))
-    
-    # Metoda 2: Szukamy po klasach (może się zmieniać!)
-    if not summary:
-        print("Próbuję alternatywnej metody wyszukiwania...")
-        changes = soup.select('.change-detail, .patch-change, .content-block')
-        for change in changes[:10]:  # Ograniczamy do 10 zmian
-            text = change.get_text(strip=True)
-            if text and len(text) < 150:  # Pomijamy zbyt długie fragmenty
-                summary.append(text)
-    
-    return '\n'.join(summary[:15]) if summary else "No detailed changes found."
+    """Ulepszona funkcja do wyciągania zmian z patchnotów"""
+    try:
+        print(f"\n=== Przetwarzam: {patch_url} ===", file=sys.stderr)
+        soup = debug_website(patch_url)
+        if not soup:
+            return "Could not fetch patch details."
+
+        summary = []
+        
+        # Nowa struktura strony (2025)
+        patch_container = soup.find('div', class_='patch-notes__container')
+        if patch_container:
+            print("Znaleziono nowy format patchnotów (2025)", file=sys.stderr)
+            
+            # Szukamy sekcji z championami
+            for section in patch_container.find_all('h2', class_='patch-change-title'):
+                if 'Champion' in section.get_text():
+                    summary.append(f"\n**{section.get_text(strip=True)}**")
+                    for change in section.find_next_siblings('div', class_='patch-change'):
+                        summary.append(change.get_text(' ', strip=True)[:150] + "...")
+        
+        # Dla starszych formatów
+        if not summary:
+            print("Próbuję starszej metody parsowania...", file=sys.stderr)
+            changes = soup.find_all(['h3', 'h4'], string=lambda t: 'Change' in str(t))
+            for change in changes:
+                summary.append(f"\n**{change.get_text()}**")
+                for item in change.find_next_siblings('p', limit=5):
+                    summary.append(item.get_text(' ', strip=True)[:100] + "...")
+        
+        return '\n'.join(summary[:15]) if summary else "No detailed changes found."
+
+    except Exception as e:
+        print(f"Błąd w extract_patch_summary: {e}", file=sys.stderr)
+        return "Error parsing changes"
 
 @tasks.loop(hours=24)
 async def fetch_patch_notes():
     global last_posted_patch
-    print("\n=== Sprawdzam nowe patchnoty ===")
+    print("\n=== Sprawdzam nowe patchnoty ===", file=sys.stderr)
     soup = debug_website(PATCH_URL)
     if not soup:
         return
@@ -98,7 +105,7 @@ async def fetch_patch_notes():
             patch_url = 'https://www.leagueoflegends.com' + patch_url
         
         patch_title = patch_link.get_text(strip=True)
-        print(f"Znaleziono patch: {patch_title} ({patch_url})")
+        print(f"Znaleziono patch: {patch_title} ({patch_url})", file=sys.stderr)
         
         if patch_url != last_posted_patch:
             last_posted_patch = patch_url
@@ -110,17 +117,17 @@ async def fetch_patch_notes():
                     message = message[:1990] + "..."
                 await channel.send(message)
     else:
-        print("Nie znaleziono linku do patchnotów!")
+        print("Nie znaleziono linku do patchnotów!", file=sys.stderr)
 
 @bot.event
 async def on_ready():
-    print(f"Bot zalogowany jako {bot.user}")
+    print(f"Bot zalogowany jako {bot.user}", file=sys.stderr)
     fetch_patch_notes.start()
 
 @bot.command()
 async def patch(ctx):
     """Ręczne sprawdzenie najnowszych patchnotów"""
-    print(f"\n=== Żądanie patchnotów od {ctx.author} ===")
+    print(f"\n=== Żądanie patchnotów od {ctx.author} ===", file=sys.stderr)
     await ctx.send("Sprawdzam najnowsze patchnoty...")
     
     soup = debug_website(PATCH_URL)
@@ -147,8 +154,8 @@ async def patch(ctx):
         await ctx.send(message)
     else:
         await ctx.send("Nie znaleziono najnowszych patchnotów. Struktura strony mogła ulec zmianie.")
-        print("Struktura HTML strony:")
-        print(soup.prettify()[:1000])
+        print("Struktura HTML strony:", file=sys.stderr)
+        print(soup.prettify()[:1000], file=sys.stderr)
 
 # Serwer pingujący
 app = Flask(__name__)
