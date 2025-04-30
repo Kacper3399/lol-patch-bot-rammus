@@ -37,7 +37,7 @@ def debug_website(url):
         return None
 
 def extract_patch_summary(patch_url):
-    """Ulepszona funkcja do wyciągania zmian championów i przedmiotów"""
+    """Funkcja dokładnie wyciągająca szczegóły zmian"""
     try:
         print(f"\n=== Przetwarzam: {patch_url} ===", file=sys.stderr)
         soup = debug_website(patch_url)
@@ -48,48 +48,46 @@ def extract_patch_summary(patch_url):
         item_changes = []
 
         # Szukamy wszystkich sekcji z zmianami
-        sections = soup.find_all(['h2', 'h3'])
-        
-        for section in sections:
+        for section in soup.find_all(['h2', 'h3']):
             section_text = section.get_text(strip=True).lower()
             
             # Sekcja championów
             if 'champion' in section_text:
                 print(f"Znaleziono sekcję championów: {section.get_text(strip=True)}", file=sys.stderr)
-                current = section.next_sibling
+                current = section.find_next()
                 
                 while current and current.name not in ['h2', 'h3']:
                     if current.name == 'h4':
                         champ_name = current.get_text(strip=True)
                         champion_changes.append(f"\n**{champ_name}**")
-                    elif current.name in ['p', 'li']:
-                        text = current.get_text(' ', strip=True)
-                        if text and len(text) > 10 and not any(x in text.lower() for x in ['http', '©']):
-                            champion_changes.append(f"- {text}")
-                    elif current.name == 'div' and current.get('class'):
-                        text = current.get_text(' ', strip=True)
-                        if text and len(text) > 10:
-                            champion_changes.append(f"- {text}")
-                    current = current.next_sibling
+                        # Szukamy zmian dla tego championa
+                        next_node = current.find_next_sibling()
+                        while next_node and next_node.name not in ['h2', 'h3', 'h4']:
+                            if next_node.name in ['p', 'li', 'div']:
+                                text = next_node.get_text(' ', strip=True)
+                                if text and len(text) > 10 and not any(x in text.lower() for x in ['http', '©']):
+                                    champion_changes.append(f"- {text}")
+                            next_node = next_node.find_next_sibling()
+                    current = current.find_next()
 
             # Sekcja przedmiotów
             elif 'item' in section_text:
                 print(f"Znaleziono sekcję przedmiotów: {section.get_text(strip=True)}", file=sys.stderr)
-                current = section.next_sibling
+                current = section.find_next()
                 
                 while current and current.name not in ['h2', 'h3']:
                     if current.name == 'h4':
                         item_name = current.get_text(strip=True)
                         item_changes.append(f"\n**{item_name}**")
-                    elif current.name in ['p', 'li']:
-                        text = current.get_text(' ', strip=True)
-                        if text and len(text) > 10 and not any(x in text.lower() for x in ['http', '©']):
-                            item_changes.append(f"- {text}")
-                    elif current.name == 'div' and current.get('class'):
-                        text = current.get_text(' ', strip=True)
-                        if text and len(text) > 10:
-                            item_changes.append(f"- {text}")
-                    current = current.next_sibling
+                        # Szukamy zmian dla tego przedmiotu
+                        next_node = current.find_next_sibling()
+                        while next_node and next_node.name not in ['h2', 'h3', 'h4']:
+                            if next_node.name in ['p', 'li', 'div']:
+                                text = next_node.get_text(' ', strip=True)
+                                if text and len(text) > 10 and not any(x in text.lower() for x in ['http', '©']):
+                                    item_changes.append(f"- {text}")
+                            next_node = next_node.find_next_sibling()
+                    current = current.find_next()
 
         # Formatowanie wyników
         result = []
@@ -101,11 +99,11 @@ def extract_patch_summary(patch_url):
             result.append("\n**ITEM CHANGES**")
             result.extend(item_changes)
 
-        return '\n'.join(result) if result else "No detailed changes found. Please check the patch notes manually as the website structure may have changed."
+        return '\n'.join(result) if result else "No detailed changes found. The website structure may have changed."
 
     except Exception as e:
         print(f"Błąd w extract_patch_summary: {e}", file=sys.stderr)
-        return "Error parsing changes. Check bot logs for details."
+        return "Error parsing changes. Please check the website manually."
 
 @tasks.loop(hours=24)
 async def fetch_patch_notes():
