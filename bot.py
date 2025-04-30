@@ -18,7 +18,7 @@ bot = commands.Bot(command_prefix='!', intents=intents)
 last_posted_patch = None
 
 def debug_website(url):
-    """Funkcja do debugowania - pokazuje zawartość strony"""
+    """Funkcja do debugowania strony"""
     try:
         print("=== Pobieram stronę patchnotów ===", file=sys.stderr)
         response = requests.get(url, timeout=10)
@@ -37,72 +37,83 @@ def debug_website(url):
         return None
 
 def extract_patch_summary(patch_url):
-    """Ulepszona funkcja do wyciągania zmian z patchnotów (2025)"""
+    """Funkcja wyciągająca zmiany championów i przedmiotów"""
     try:
         print(f"\n=== Przetwarzam: {patch_url} ===", file=sys.stderr)
         soup = debug_website(patch_url)
         if not soup:
             return "Could not fetch patch details."
 
-        summary = []
+        champion_changes = []
+        item_changes = []
         
         # Szukamy sekcji championów
         champion_section = None
-        
-        # Metoda 1: Szukamy po nagłówkach
-        for h2 in soup.find_all(['h2', 'h3']):
-            if 'champion' in h2.get_text().lower():
-                champion_section = h2
+        champion_headers = ['Champion Changes', 'Champion Updates', 'Champions']
+        for header in champion_headers:
+            champion_section = soup.find(lambda tag: tag.name in ['h2', 'h3'] and 
+                                      header.lower() in tag.get_text().lower())
+            if champion_section:
                 break
-        
-        # Metoda 2: Szukamy po klasach
-        if not champion_section:
-            for div in soup.find_all('div', class_=True):
-                if 'champion' in ' '.join(div['class']).lower():
-                    champion_section = div
-                    break
         
         if champion_section:
             print(f"Znaleziono sekcję championów: {champion_section.get_text()}", file=sys.stderr)
-            summary.append(f"\n**{champion_section.get_text(strip=True)}**")
+            current = champion_section.find_next_sibling()
             
-            # Znajdź wszystkie zmiany w sekcji
-            current = champion_section.find_next()
-            changes_count = 0
-            
-            while current and changes_count < 15:  # Limit 15 zmian
+            while current and current.name not in ['h2', 'h3']:
                 if current.name in ['h4', 'h5']:
-                    # Nazwa championa lub umiejętności
                     champ_name = current.get_text(strip=True)
-                    if len(champ_name) < 50:  # Filtruj zbyt długie teksty
-                        summary.append(f"\n__{champ_name}__")
-                        changes_count += 1
+                    champion_changes.append(f"\n**{champ_name}**")
                 elif current.name in ['p', 'li']:
-                    # Szczegóły zmian
                     text = current.get_text(' ', strip=True)
-                    if 10 < len(text) < 150:  # Filtruj zbyt krótkie/długie
-                        summary.append(f"- {text}")
-                        changes_count += 1
+                    if text and not text.startswith(('http', '©')):
+                        champion_changes.append(f"- {text}")
                 elif current.name == 'div' and current.get('class'):
-                    # Zmiany w divach
                     text = current.get_text(' ', strip=True)
-                    if 'change' in ' '.join(current['class']).lower() and 10 < len(text) < 150:
-                        summary.append(f"- {text}")
-                        changes_count += 1
+                    if text and len(text) > 10:
+                        champion_changes.append(f"- {text}")
                 
-                current = current.find_next()
+                current = current.find_next_sibling()
+
+        # Szukamy sekcji przedmiotów
+        item_section = None
+        item_headers = ['Item Changes', 'Item Updates', 'Items']
+        for header in item_headers:
+            item_section = soup.find(lambda tag: tag.name in ['h2', 'h3'] and 
+                                  header.lower() in tag.get_text().lower())
+            if item_section:
+                break
         
-        # Jeśli nie znaleziono sekcji championów, spróbuj alternatywnej metody
-        if not summary:
-            print("Próbuję alternatywnej metody parsowania...", file=sys.stderr)
-            for item in soup.find_all(['h4', 'h5', 'li', 'p']):
-                text = item.get_text(' ', strip=True)
-                if any(word in text.lower() for word in ['buff', 'nerf', 'change', 'adjust', 'update']) and 10 < len(text) < 150:
-                    summary.append(f"- {text}")
-                    if len(summary) >= 10:  # Limit 10 zmian
-                        break
+        if item_section:
+            print(f"Znaleziono sekcję przedmiotów: {item_section.get_text()}", file=sys.stderr)
+            current = item_section.find_next_sibling()
+            
+            while current and current.name not in ['h2', 'h3']:
+                if current.name in ['h4', 'h5']:
+                    item_name = current.get_text(strip=True)
+                    item_changes.append(f"\n**{item_name}**")
+                elif current.name in ['p', 'li']:
+                    text = current.get_text(' ', strip=True)
+                    if text and not text.startswith(('http', '©')):
+                        item_changes.append(f"- {text}")
+                elif current.name == 'div' and current.get('class'):
+                    text = current.get_text(' ', strip=True)
+                    if text and len(text) > 10:
+                        item_changes.append(f"- {text}")
+                
+                current = current.find_next_sibling()
+
+        # Łączymy wyniki
+        result = []
+        if champion_changes:
+            result.append("**CHAMPION CHANGES**")
+            result.extend(champion_changes)
         
-        return '\n'.join(summary) if summary else "No detailed champion changes found."
+        if item_changes:
+            result.append("\n**ITEM CHANGES**")
+            result.extend(item_changes)
+
+        return '\n'.join(result) if result else "No champion or item changes found."
 
     except Exception as e:
         print(f"Błąd w extract_patch_summary: {e}", file=sys.stderr)
@@ -149,8 +160,13 @@ async def fetch_patch_notes():
             if channel:
                 message = f"**New LoL Patch Notes:** {patch_title}\n{patch_url}\n{summary}"
                 if len(message) > 2000:
-                    message = message[:1990] + "..."
-                await channel.send(message)
+                    # Dzielimy wiadomość jeśli jest zbyt długa
+                    part1 = message[:2000]
+                    part2 = message[2000:4000]
+                    await channel.send(part1)
+                    await channel.send(part2)
+                else:
+                    await channel.send(message)
     else:
         print("Nie znaleziono linku do patchnotów!", file=sys.stderr)
 
@@ -184,9 +200,12 @@ async def patch(ctx):
         
         message = f"**Latest Patch:** {patch_title}\n{patch_url}\n{summary}"
         if len(message) > 2000:
-            message = message[:1990] + "..."
-        
-        await ctx.send(message)
+            part1 = message[:2000]
+            part2 = message[2000:4000]
+            await ctx.send(part1)
+            await ctx.send(part2)
+        else:
+            await ctx.send(message)
     else:
         await ctx.send("Nie znaleziono najnowszych patchnotów. Struktura strony mogła ulec zmianie.")
         print("Struktura HTML strony:", file=sys.stderr)
