@@ -1,121 +1,63 @@
 import discord
 import requests
 from discord.ext import commands, tasks
+from flask import Flask
+from threading import Thread
 import os
-import sys
 from datetime import datetime
 
 TOKEN = os.getenv("DISCORD_TOKEN")
 CHANNEL_ID = int(os.getenv("CHANNEL_ID"))
-RIOT_API_KEY = os.getenv("RIOT_API_KEY")  # Twój stały klucz API
+RIOT_API_KEY = os.getenv("RIOT_API_KEY")
 DATA_DRAGON_URL = "https://ddragon.leagueoflegends.com"
 
-intents = discord.Intents.default()
-intents.message_content = True
-
-bot = commands.Bot(command_prefix='!', intents=intents)
+bot = commands.Bot(command_prefix='!', intents=discord.Intents.default())
 last_patch_version = None
 
 class RiotAPI:
     @staticmethod
-    def get_latest_patch_version():
+    def get_latest_patch():
         try:
-            versions_url = f"{DATA_DRAGON_URL}/api/versions.json"
-            response = requests.get(versions_url)
-            return response.json()[0] if response.status_code == 200 else None
-        except Exception as e:
-            print(f"Error getting patch version: {e}", file=sys.stderr)
+            versions = requests.get(f"{DATA_DRAGON_URL}/api/versions.json").json()
+            return versions[0]
+        except:
             return None
 
     @staticmethod
-    def get_patch_notes(patch_version):
+    def get_patch_data(version):
         try:
-            notes_url = f"{DATA_DRAGON_URL}/patchnotes/{patch_version}.json"
-            response = requests.get(notes_url, headers={"X-Riot-Token": RIOT_API_KEY})
-            return response.json() if response.status_code == 200 else None
-        except Exception as e:
-            print(f"Error getting patch notes: {e}", file=sys.stderr)
+            return requests.get(
+                f"{DATA_DRAGON_URL}/patchnotes/{version}.json",
+                headers={"X-Riot-Token": RIOT_API_KEY}
+            ).json()
+        except:
             return None
 
-def format_patch_notes(patch_data):
-    if not patch_data:
-        return "Brak danych o patchu."
-    
-    formatted = []
-    
-    # Nagłówek z wersją i datą
-    patch_date = datetime.strptime(patch_data['date'], "%Y-%m-%d").strftime("%d.%m.%Y")
-    formatted.append(f"**Patch {patch_data['version']} ({patch_date})**")
-    
-    # Zmiany championów
-    if 'champions' in patch_data:
-        formatted.append("\n**CHAMPION CHANGES**")
-        for champ in patch_data['champions']:
-            formatted.append(f"\n**{champ['name']}**")
-            for change in champ['changes']:
-                formatted.append(f"- {change['description']}")
-    
-    # Zmiany przedmiotów
-    if 'items' in patch_data:
-        formatted.append("\n**ITEM CHANGES**")
-        for item in patch_data['items']:
-            formatted.append(f"\n**{item['name']}**")
-            for change in item['changes']:
-                formatted.append(f"- {change['description']}")
-    
-    return "\n".join(formatted) if len(formatted) > 1 else "Brak zmian w tym patchu."
-
 @tasks.loop(hours=24)
-async def check_for_patches():
+async def check_patches():
     global last_patch_version
-    current_version = RiotAPI.get_latest_patch_version()
-    
-    if current_version and current_version != last_patch_version:
-        patch_data = RiotAPI.get_patch_notes(current_version)
-        if patch_data:
-            last_patch_version = current_version
-            notes = format_patch_notes(patch_data)
-            
-            channel = bot.get_channel(CHANNEL_ID)
-            if channel:
-                # Dzielenie długich wiadomości
-                parts = [notes[i:i+2000] for i in range(0, len(notes), 2000)]
-                for part in parts:
-                    await channel.send(part)
+    version = RiotAPI.get_latest_patch()
+    if version and version != last_patch_version:
+        data = RiotAPI.get_patch_data(version)
+        if data:
+            last_patch_version = version
+            message = f"**Patch {version}**\n\n"
+            if 'champions' in data:
+                message += "**CHANGES:**\n" + "\n".join(
+                    f"{champ['name']}: {change['description']}" 
+                    for champ in data['champions'] 
+                    for change in champ['changes']
+                )
+            await bot.get_channel(CHANNEL_ID).send(message[:2000])
 
 @bot.event
 async def on_ready():
-    print(f"Bot zalogowany jako {bot.user}", file=sys.stderr)
-    check_for_patches.start()
+    check_patches.start()
 
-@bot.command()
-async def patch(ctx):
-    """Ręczne sprawdzenie najnowszych patchnotów"""
-    current_version = RiotAPI.get_latest_patch_version()
-    if not current_version:
-        await ctx.send("❌ Nie udało się pobrać informacji o patchu.")
-        return
-    
-    patch_data = RiotAPI.get_patch_notes(current_version)
-    if not patch_data:
-        await ctx.send("❌ Nie udało się pobrać szczegółów patcha.")
-        return
-    
-    notes = format_patch_notes(patch_data)
-    parts = [notes[i:i+2000] for i in range(0, len(notes), 2000)]
-    for part in parts:
-        await ctx.send(part)
-
-# Serwer pingujący (zachowujemy z Twojego oryginalnego kodu)
 app = Flask(__name__)
-
 @app.route('/')
-def home():
-    return "Bot działa!", 200
-
-def run_flask():
-    app.run(host='0.0.0.0', port=int(os.environ.get('PORT', 5000)))
+def home(): return "Bot running"
 
 if __name__ == '__main__':
-    Thread(target=run_flask).start()
+    Thread(target=lambda: app.run(host='0.0.0.0', port=5000)).start()
     bot.run(TOKEN)
