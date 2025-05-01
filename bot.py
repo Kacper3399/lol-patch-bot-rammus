@@ -11,7 +11,11 @@ CHANNEL_ID = int(os.getenv("CHANNEL_ID"))
 RIOT_API_KEY = os.getenv("RIOT_API_KEY")
 DATA_DRAGON_URL = "https://ddragon.leagueoflegends.com"
 
-bot = commands.Bot(command_prefix='!', intents=discord.Intents.default())
+# ✅ Dodano message_content intent
+intents = discord.Intents.default()
+intents.message_content = True
+bot = commands.Bot(command_prefix='!', intents=intents)
+
 last_patch_version = None
 
 class RiotAPI:
