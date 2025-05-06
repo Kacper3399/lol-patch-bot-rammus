@@ -49,7 +49,7 @@ class RiotAPI:
             print(f"Błąd pobierania patcha: {e}")
             return None
 
-        soup = BeautifulSoup(response.text, 'lxml')
+        soup = BeautifulSoup(response.text, 'html.parser')
         result = []
 
         def extract_section(title_keywords, emoji):
