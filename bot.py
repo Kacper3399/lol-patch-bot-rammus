@@ -6,7 +6,6 @@ from threading import Thread
 from bs4 import BeautifulSoup
 import os
 from datetime import datetime
-import re
 
 # --- ENV ---
 TOKEN = os.getenv("DISCORD_TOKEN")
@@ -23,33 +22,19 @@ last_patch_version = None
 # --- Riot API & Scraper ---
 class RiotAPI:
     @staticmethod
-    def extract_changes(soup):
-        # Regular expression to match changes like "Q damage: 70 / 105 / 140 / 175 / 210 (+ 80% AP) ⇒ 80 / 120 / 160 / 200 / 240 (+ 80% AP)"
-        changes = []
-        
-        # Szukamy elementów zawierających informacje o zmianach
-        ability_titles = soup.find_all('h4', class_='change-detail-title ability-title')
-
-        for title in ability_titles:
-            # Dla każdej umiejętności, spróbujemy znaleźć liściowe elementy, które zawierają zmiany
-            ability_list = title.find_next('ul')
-            if ability_list:
-                for change_item in ability_list.find_all('li'):
-                    change_text = change_item.get_text(strip=True)
-                    # Dopasowujemy wzór, aby znaleźć zmiany
-                    match = re.search(r'(\d+(?:/\d+)*)(?:\s*⇒\s*)(\d+(?:/\d+)*)', change_text)
-                    if match:
-                        old_value = match.group(1)
-                        new_value = match.group(2)
-                        changes.append(f"{title.get_text(strip=True)}: {old_value} ⇒ {new_value}")
-        
-        return '\n'.join(changes) if changes else None
+    def get_latest_patch():
+        try:
+            versions = requests.get(f"{DATA_DRAGON_URL}/api/versions.json").json()
+            return versions[0]  # przykład: "14.9.1"
+        except Exception as e:
+            print(f"Błąd pobierania wersji patcha: {e}")
+            return None
 
     @staticmethod
     def get_patch_data(version):
         try:
             major, minor = version.split('.')[:2]
-            season_number = datetime.now().year - 2000
+            season_number = datetime.now().year - 2000  # np. 2025 → 25
             patch_url = f"https://www.leagueoflegends.com/en-us/news/game-updates/patch-{season_number}-{int(minor):02d}-notes/"
         except Exception as e:
             print(f"Nieprawidłowy format wersji: {version} | {e}")
@@ -64,60 +49,41 @@ class RiotAPI:
             print(f"Błąd pobierania patcha: {e}")
             return None
 
-        soup = BeautifulSoup(response.text, 'lxml')
-        result = []
+        soup = BeautifulSoup(response.text, 'html.parser')
 
-        # Extract champions and abilities' changes
-        changes = RiotAPI.extract_changes(soup)
-        if changes:
-            result.append("**Zmiany w umiejętnościach i statystykach bohaterów:**\n" + changes)
+        # Funkcja do wyciągania zmian liczb i bohatera
+        def extract_changes_with_champions(soup):
+            changes = []
 
-        # Skins
-        skins_section = soup.find('h2', string=lambda s: s and "skins" in s.lower())
-        if skins_section:
-            result.append("\n**🎨 Skins:**")
-            for tag in skins_section.find_all_next(['h3', 'p']):
-                if tag.name == 'h2':
-                    break  # stop at the next section
-                if tag.name == 'h3':
-                    result.append(f"\n**{tag.get_text(strip=True)}**")
-                elif tag.name == 'p':
-                    text = tag.get_text(strip=True)
-                    if text:
-                        result.append(f"> {text}")
+            # Szukamy wszystkich sekcji z informacjami o bohaterach
+            for champion_section in soup.find_all('h3', class_='change-title'):
+                champion_name = champion_section.get_text(strip=True).split('@')[0].strip()
 
-        # Chromas
-        chromas_section = soup.find('h2', string=lambda s: s and "chroma" in s.lower())
-        if chromas_section:
-            result.append("\n**🌈 Chromas:**")
-            for tag in chromas_section.find_all_next(['h3', 'p']):
-                if tag.name == 'h2':
-                    break  # stop at the next section
-                if tag.name == 'h3':
-                    result.append(f"\n**{tag.get_text(strip=True)}**")
-                elif tag.name == 'p':
-                    text = tag.get_text(strip=True)
-                    if text:
-                        result.append(f"> {text}")
+                # Sprawdzamy, czy mamy nazwę bohatera
+                if champion_name:
+                    # Zbieramy zmiany dotyczące tego bohatera
+                    ability_changes = []
+                    for ability_section in champion_section.find_all_next('h4', class_='change-detail-title ability-title'):
+                        ability_name = ability_section.get_text(strip=True).replace(' - ', '')
 
-        # Clean up empty or duplicate lines
-        clean_result = []
-        seen = set()
-        for line in result:
-            if line not in seen and line.strip():
-                clean_result.append(line)
-                seen.add(line)
+                        list_items = ability_section.find_next('ul').find_all('li')
+                        for item in list_items:
+                            change_text = item.get_text(strip=True)
+                            if '⇒' in change_text:  # Znaleziono zmianę
+                                before, after = change_text.split('⇒')
+                                before = before.strip()
+                                after = after.strip()
+                                ability_changes.append(f"{ability_name}: {before} ⇒ {after}")
 
-        return "\n".join(clean_result) if clean_result else None
+                    if ability_changes:
+                        changes.append(f"Zmiany dla {champion_name}:")
+                        changes.extend(ability_changes)
 
-    @staticmethod
-    def get_latest_patch():
-        try:
-            versions = requests.get(f"{DATA_DRAGON_URL}/api/versions.json").json()
-            return versions[0]  # przykład: "14.9.1"
-        except Exception as e:
-            print(f"Błąd pobierania wersji patcha: {e}")
-            return None
+            return changes
+
+        # Wyciąganie zmian
+        changes = extract_changes_with_champions(soup)
+        return "\n".join(changes) if changes else None
 
 # --- Cykliczne sprawdzanie patcha ---
 @tasks.loop(hours=24)
