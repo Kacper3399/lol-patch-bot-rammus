@@ -23,24 +23,30 @@ last_patch_version = None
 # --- Riot API & Scraper ---
 class RiotAPI:
     @staticmethod
-    def get_latest_patch():
-        try:
-            versions = requests.get(f"{DATA_DRAGON_URL}/api/versions.json").json()
-            return versions[0]
-        except Exception as e:
-            print(f"Błąd pobierania wersji patcha: {e}")
-            return None
+    def extract_changes(soup):
+        # Regular expression to match changes like "Q damage: 70 / 105 / 140 / 175 / 210 (+ 80% AP) ⇒ 80 / 120 / 160 / 200 / 240 (+ 80% AP)"
+        changes = []
+        
+        # Szukamy elementów zawierających informacje o zmianach
+        ability_titles = soup.find_all('h4', class_='change-detail-title ability-title')
+
+        for title in ability_titles:
+            # Dla każdej umiejętności, spróbujemy znaleźć liściowe elementy, które zawierają zmiany
+            ability_list = title.find_next('ul')
+            if ability_list:
+                for change_item in ability_list.find_all('li'):
+                    change_text = change_item.get_text(strip=True)
+                    # Dopasowujemy wzór, aby znaleźć zmiany
+                    match = re.search(r'(\d+(?:/\d+)*)(?:\s*⇒\s*)(\d+(?:/\d+)*)', change_text)
+                    if match:
+                        old_value = match.group(1)
+                        new_value = match.group(2)
+                        changes.append(f"{title.get_text(strip=True)}: {old_value} ⇒ {new_value}")
+        
+        return '\n'.join(changes) if changes else None
 
     @staticmethod
     def get_patch_data(version):
-        def extract_changes(text):
-            pattern = r'([\w\s%/]+):?\s*(\d+(?:/\d+)*)(?:\s*⇒\s*|\s*→\s*|\s*->\s*)(\d+(?:/\d+)*)'
-            matches = re.findall(pattern, text)
-            changes = []
-            for stat, old, new in matches:
-                changes.append(f"{stat.strip()}: {old} ⇒ {new}")
-            return '\n'.join(changes) if changes else None
-
         try:
             major, minor = version.split('.')[:2]
             season_number = datetime.now().year - 2000
@@ -61,26 +67,10 @@ class RiotAPI:
         soup = BeautifulSoup(response.text, 'lxml')
         result = []
 
-        def extract_section(title_keywords, emoji):
-            section = soup.find('h2', string=lambda s: s and any(kw in s.lower() for kw in title_keywords))
-            entries = []
-            if section:
-                entries.append(f"**{emoji} {' '.join(title_keywords).title()} Changes:**")
-                for tag in section.find_all_next(['h2', 'h3', 'p']):
-                    if tag.name == 'h2':
-                        break
-                    if tag.name == 'h3':
-                        entries.append(f"\n**{tag.get_text(strip=True)}**")
-                    elif tag.name == 'p':
-                        text = tag.get_text(strip=True)
-                        if text and not text.lower().startswith("the following"):
-                            detailed = extract_changes(text)
-                            if detailed:
-                                entries.append(f"> {detailed}")
-            return entries
-
-        result += extract_section(['champion'], '🧙‍♂️')
-        result += extract_section(['item'], '🛡️')
+        # Extract champions and abilities' changes
+        changes = RiotAPI.extract_changes(soup)
+        if changes:
+            result.append("**Zmiany w umiejętnościach i statystykach bohaterów:**\n" + changes)
 
         # Skins
         skins_section = soup.find('h2', string=lambda s: s and "skins" in s.lower())
@@ -88,7 +78,7 @@ class RiotAPI:
             result.append("\n**🎨 Skins:**")
             for tag in skins_section.find_all_next(['h3', 'p']):
                 if tag.name == 'h2':
-                    break
+                    break  # stop at the next section
                 if tag.name == 'h3':
                     result.append(f"\n**{tag.get_text(strip=True)}**")
                 elif tag.name == 'p':
@@ -102,7 +92,7 @@ class RiotAPI:
             result.append("\n**🌈 Chromas:**")
             for tag in chromas_section.find_all_next(['h3', 'p']):
                 if tag.name == 'h2':
-                    break
+                    break  # stop at the next section
                 if tag.name == 'h3':
                     result.append(f"\n**{tag.get_text(strip=True)}**")
                 elif tag.name == 'p':
@@ -110,7 +100,7 @@ class RiotAPI:
                     if text:
                         result.append(f"> {text}")
 
-        # Clean
+        # Clean up empty or duplicate lines
         clean_result = []
         seen = set()
         for line in result:
@@ -120,7 +110,16 @@ class RiotAPI:
 
         return "\n".join(clean_result) if clean_result else None
 
-# --- Cyclic Patch Checker ---
+    @staticmethod
+    def get_latest_patch():
+        try:
+            versions = requests.get(f"{DATA_DRAGON_URL}/api/versions.json").json()
+            return versions[0]  # przykład: "14.9.1"
+        except Exception as e:
+            print(f"Błąd pobierania wersji patcha: {e}")
+            return None
+
+# --- Cykliczne sprawdzanie patcha ---
 @tasks.loop(hours=24)
 async def check_patches():
     global last_patch_version
@@ -132,18 +131,19 @@ async def check_patches():
             channel = bot.get_channel(CHANNEL_ID)
             if channel:
                 await channel.send(f"📢 Nowy patch **{version}** dostępny!")
+                # Split the data into chunks of 2000 characters
                 chunks = [data[i:i+2000] for i in range(0, len(data), 2000)]
                 for chunk in chunks:
                     await channel.send(chunk)
 
-# --- Ready Event ---
+# --- Event: on_ready ---
 @bot.event
 async def on_ready():
     print(f"Zalogowano jako {bot.user}")
     if not check_patches.is_running():
         check_patches.start()
 
-# --- Commands ---
+# --- Komendy ---
 @bot.command()
 async def ping(ctx):
     await ctx.send("Pong!")
@@ -161,11 +161,13 @@ async def patch(ctx):
         return
 
     await ctx.send(f"📢 Nowy patch **{version}** dostępny!")
+
+    # Dzielenie na segmenty po 2000 znaków
     chunks = [data[i:i+2000] for i in range(0, len(data), 2000)]
     for chunk in chunks:
         await ctx.send(chunk)
 
-# --- Flask Keep-Alive ---
+# --- Keep-alive server for Render ---
 app = Flask(__name__)
 
 @app.route('/')
@@ -173,6 +175,7 @@ def home():
     return "Bot is alive."
 
 if __name__ == '__main__':
+    # Ustawienie portu dla Render.com
     port = int(os.environ.get("PORT", 5000))
     Thread(target=lambda: app.run(host='0.0.0.0', port=port)).start()
     bot.run(TOKEN)
