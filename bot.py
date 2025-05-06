@@ -32,7 +32,6 @@ class RiotAPI:
 
     @staticmethod
     def get_patch_data(version):
-        # Konwersja np. "14.9.1" -> "25-09"
         try:
             major, minor = version.split('.')[:2]
             season_number = datetime.now().year - 2000  # np. 2025 → 25
@@ -53,13 +52,33 @@ class RiotAPI:
         soup = BeautifulSoup(response.text, 'lxml')
         result = []
 
-        # Champions
-        champions_section = soup.find('h2', string=lambda s: s and "champion" in s.lower())
-        if champions_section:
-            result.append("**🧙‍♂️ Champion Changes:**")
-            for tag in champions_section.find_all_next(['h3', 'p']):
+        def extract_section(title_keywords, emoji):
+            section = soup.find('h2', string=lambda s: s and any(kw in s.lower() for kw in title_keywords))
+            entries = []
+            if section:
+                entries.append(f"**{emoji} {' '.join(title_keywords).title()} Changes:**")
+                for tag in section.find_all_next(['h2', 'h3', 'p']):
+                    if tag.name == 'h2':
+                        break  # zakończ, jeśli trafimy na nową sekcję
+                    if tag.name == 'h3':
+                        entries.append(f"\n**{tag.get_text(strip=True)}**")
+                    elif tag.name == 'p':
+                        text = tag.get_text(strip=True)
+                        if text and not text.lower().startswith("the following"):
+                            entries.append(f"> {text}")
+            return entries
+
+        # Extract champions and items
+        result += extract_section(['champion'], '🧙‍♂️')
+        result += extract_section(['item'], '🛡️')
+
+        # Extract skins and chromas
+        skins_section = soup.find('h2', string=lambda s: s and "skins" in s.lower())
+        if skins_section:
+            result.append("\n**🎨 Skins:**")
+            for tag in skins_section.find_all_next(['h3', 'p']):
                 if tag.name == 'h2':
-                    break
+                    break  # stop at the next section
                 if tag.name == 'h3':
                     result.append(f"\n**{tag.get_text(strip=True)}**")
                 elif tag.name == 'p':
@@ -67,13 +86,13 @@ class RiotAPI:
                     if text:
                         result.append(f"> {text}")
 
-        # Items
-        items_section = soup.find('h2', string=lambda s: s and "item" in s.lower())
-        if items_section:
-            result.append("\n\n**🛡️ Item Changes:**")
-            for tag in items_section.find_all_next(['h3', 'p']):
+        # Extract chromas
+        chromas_section = soup.find('h2', string=lambda s: s and "chroma" in s.lower())
+        if chromas_section:
+            result.append("\n**🌈 Chromas:**")
+            for tag in chromas_section.find_all_next(['h3', 'p']):
                 if tag.name == 'h2':
-                    break
+                    break  # stop at the next section
                 if tag.name == 'h3':
                     result.append(f"\n**{tag.get_text(strip=True)}**")
                 elif tag.name == 'p':
@@ -81,13 +100,17 @@ class RiotAPI:
                     if text:
                         result.append(f"> {text}")
 
-        if not result:
-            print(f"Brak danych w HTML: {patch_url}")
-            return None
+        # Remove empty or duplicate lines
+        clean_result = []
+        seen = set()
+        for line in result:
+            if line not in seen and line.strip():
+                clean_result.append(line)
+                seen.add(line)
 
-        return "\n".join(result)
+        return "\n".join(clean_result) if clean_result else None
 
-# --- Zadanie cykliczne ---
+# --- Cykliczne sprawdzanie patcha ---
 @tasks.loop(hours=24)
 async def check_patches():
     global last_patch_version
@@ -96,10 +119,13 @@ async def check_patches():
         data = RiotAPI.get_patch_data(version)
         if data:
             last_patch_version = version
-            message = f"**Nowy patch {version} dostępny!**\n\n{data[:1900]}"
             channel = bot.get_channel(CHANNEL_ID)
             if channel:
-                await channel.send(message)
+                await channel.send(f"📢 Nowy patch **{version}** dostępny!")
+                # Split the data into chunks of 2000 characters
+                chunks = [data[i:i+2000] for i in range(0, len(data), 2000)]
+                for chunk in chunks:
+                    await channel.send(chunk)
 
 # --- Event: on_ready ---
 @bot.event
@@ -119,11 +145,18 @@ async def patch(ctx):
     if not version:
         await ctx.send("❌ Nie udało się pobrać wersji patcha.")
         return
+
     data = RiotAPI.get_patch_data(version)
     if not data:
         await ctx.send("❌ Nie udało się pobrać danych patcha.")
         return
-    await ctx.send(f"**Patch {version}**\n{data[:1900]}")
+
+    await ctx.send(f"📢 Nowy patch **{version}** dostępny!")
+
+    # Dzielenie na segmenty po 2000 znaków
+    chunks = [data[i:i+2000] for i in range(0, len(data), 2000)]
+    for chunk in chunks:
+        await ctx.send(chunk)
 
 # --- Keep-alive server for Render ---
 app = Flask(__name__)
