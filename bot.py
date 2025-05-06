@@ -3,29 +3,29 @@ import requests
 from discord.ext import commands, tasks
 from flask import Flask
 from threading import Thread
+from bs4 import BeautifulSoup
 import os
 from datetime import datetime
-from bs4 import BeautifulSoup
-import re
 
+# --- ENV ---
 TOKEN = os.getenv("DISCORD_TOKEN")
 CHANNEL_ID = int(os.getenv("CHANNEL_ID"))
-RIOT_API_KEY = os.getenv("RIOT_API_KEY")
 DATA_DRAGON_URL = "https://ddragon.leagueoflegends.com"
 
-# Dodano message_content intent
+# --- Discord Setup ---
 intents = discord.Intents.default()
 intents.message_content = True
 bot = commands.Bot(command_prefix='!', intents=intents)
 
 last_patch_version = None
 
+# --- Riot API & Scraper ---
 class RiotAPI:
     @staticmethod
     def get_latest_patch():
         try:
             versions = requests.get(f"{DATA_DRAGON_URL}/api/versions.json").json()
-            return versions[0]  # np. "14.9.1"
+            return versions[0]  # przykład: "14.9.1"
         except Exception as e:
             print(f"Błąd pobierania wersji patcha: {e}")
             return None
@@ -65,22 +65,8 @@ class RiotAPI:
                     elif tag.name == 'p':
                         text = tag.get_text(strip=True)
                         if text and not text.lower().startswith("the following"):
-                            # Wyciąganie liczb z tekstu zmiany
-                            changes = extract_changes(text)
-                            if changes:
-                                entries.append(f"> {changes}")
-
+                            entries.append(f"> {text}")
             return entries
-
-        def extract_changes(text):
-            # Szukamy liczb (np. "Q damage increased by 20", "W mana cost reduced by 10")
-            pattern = r"(\w+ damage|\w+ mana cost|\w+ attack speed)\s*(increased|decreased)\s*by\s*(\d+)"
-            matches = re.findall(pattern, text)
-            changes = []
-            for match in matches:
-                ability, direction, value = match
-                changes.append(f"{ability}: {direction.title()} by {value}")
-            return '\n'.join(changes) if changes else None
 
         # Extract champions and items
         result += extract_section(['champion'], '🧙‍♂️')
@@ -124,7 +110,7 @@ class RiotAPI:
 
         return "\n".join(clean_result) if clean_result else None
 
-
+# --- Cykliczne sprawdzanie patcha ---
 @tasks.loop(hours=24)
 async def check_patches():
     global last_patch_version
@@ -133,40 +119,54 @@ async def check_patches():
         data = RiotAPI.get_patch_data(version)
         if data:
             last_patch_version = version
-            message = f"**Patch {version}**\n\n{data}"
             channel = bot.get_channel(CHANNEL_ID)
             if channel:
-                await channel.send(message[:2000])
+                await channel.send(f"📢 Nowy patch **{version}** dostępny!")
+                # Split the data into chunks of 2000 characters
+                chunks = [data[i:i+2000] for i in range(0, len(data), 2000)]
+                for chunk in chunks:
+                    await channel.send(chunk)
 
+# --- Event: on_ready ---
 @bot.event
 async def on_ready():
+    print(f"Zalogowano jako {bot.user}")
     if not check_patches.is_running():
         check_patches.start()
 
-# ✅ Komenda !ping
+# --- Komendy ---
 @bot.command()
 async def ping(ctx):
     await ctx.send("Pong!")
 
-# ✅ Komenda !patch
 @bot.command()
 async def patch(ctx):
     version = RiotAPI.get_latest_patch()
     if not version:
-        await ctx.send("Nie udało się pobrać wersji patcha.")
+        await ctx.send("❌ Nie udało się pobrać wersji patcha.")
         return
+
     data = RiotAPI.get_patch_data(version)
     if not data:
-        await ctx.send("Nie udało się pobrać danych patcha.")
+        await ctx.send("❌ Nie udało się pobrać danych patcha.")
         return
-    message = f"**Patch {version}**\n\n{data}"
-    await ctx.send(message[:2000])
 
-# Flask keep-alive
+    await ctx.send(f"📢 Nowy patch **{version}** dostępny!")
+
+    # Dzielenie na segmenty po 2000 znaków
+    chunks = [data[i:i+2000] for i in range(0, len(data), 2000)]
+    for chunk in chunks:
+        await ctx.send(chunk)
+
+# --- Keep-alive server for Render ---
 app = Flask(__name__)
+
 @app.route('/')
-def home(): return "Bot running"
+def home():
+    return "Bot is alive."
 
 if __name__ == '__main__':
-    Thread(target=lambda: app.run(host='0.0.0.0', port=5000)).start()
+    # Ustawienie portu dla Render.com
+    port = int(os.environ.get("PORT", 5000))
+    Thread(target=lambda: app.run(host='0.0.0.0', port=port)).start()
     bot.run(TOKEN)
