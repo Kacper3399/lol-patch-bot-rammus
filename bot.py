@@ -1,7 +1,5 @@
 import discord
-from discord.ext import commands, tasks
-from flask import Flask
-from threading import Thread
+from discord.ext import commands
 import requests
 from bs4 import BeautifulSoup
 import re
@@ -16,20 +14,12 @@ intents = discord.Intents.default()
 intents.message_content = True
 bot = commands.Bot(command_prefix="!", intents=intents)
 
-# Flask keep-alive
-app = Flask(__name__)
-@app.route("/")
-def home():
-    return "Bot running"
-
-def run_flask():
-    app.run(host="0.0.0.0", port=10000)
-
-Thread(target=run_flask).start()
-
-# === PATCH SCRAPER ===
+# === FUNKCJE POMOCNICZE ===
 
 def extract_changes(text):
+    """
+    Wyodrębnia zmiany liczbowe z tekstu, np. 'Q Damage: 70 ⇒ 90'
+    """
     pattern = r'([\w\s%]+):?\s*(\d+(?:/\d+)*)(?:\s*⇒\s*|\s*→\s*)(\d+(?:/\d+)*)'
     matches = re.findall(pattern, text)
     changes = []
@@ -38,13 +28,16 @@ def extract_changes(text):
     return '\n'.join(changes) if changes else None
 
 def extract_section(soup, title_keywords, emoji):
+    """
+    Wyodrębnia sekcję zmian z notatek patcha na podstawie podanych słów kluczowych.
+    """
     section = soup.find('h2', string=lambda s: s and any(kw in s.lower() for kw in title_keywords))
     entries = []
     if section:
         entries.append(f"**{emoji} {' '.join(title_keywords).title()} Changes:**")
         for tag in section.find_all_next(['h2', 'h3', 'p', 'li', 'span', 'strong']):
             if tag.name == 'h2':
-                break
+                break  # zakończ, jeśli trafimy na nową sekcję
             if tag.name == 'h3':
                 entries.append(f"\n**{tag.get_text(strip=True)}**")
             else:
@@ -56,10 +49,13 @@ def extract_section(soup, title_keywords, emoji):
     return entries
 
 def fetch_patch_notes():
+    """
+    Pobiera najnowsze notatki patcha z oficjalnej strony League of Legends.
+    """
     base_url = "https://www.leagueoflegends.com/en-us/news/game-updates/"
     index = requests.get(base_url)
     soup = BeautifulSoup(index.text, 'html.parser')
-    patch_link = soup.find('a', href=True, string=re.compile(r'Patch \d{2}-\d{2} Notes', re.I))
+    patch_link = soup.find('a', href=True, string=re.compile(r'Patch \d{2}\.\d{1,2} Notes', re.I))
     if not patch_link:
         return "❌ Nie znaleziono najnowszego patcha."
 
@@ -79,7 +75,7 @@ def fetch_patch_notes():
 
     return "\n".join(output[:2000])  # ograniczenie Discorda
 
-# === DISCORD EVENTS ===
+# === ZDARZENIA DISCORDA ===
 
 @bot.event
 async def on_ready():
@@ -101,5 +97,5 @@ async def patch(ctx):
         await ctx.send("❌ Wystąpił błąd podczas pobierania patcha.")
         print(e)
 
-# Uruchom bota
+# Uruchomienie bota
 bot.run(TOKEN)
