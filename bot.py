@@ -30,7 +30,7 @@ class RiotAPI:
             versions = requests.get(f"{DATA_DRAGON_URL}/api/versions.json").json()
             return versions[0]
         except Exception as e:
-            print(f"Błąd pierania wersji patcha: {e}")
+            print(f"Błąd pobierania wersji patcha: {e}")
             return None
 
     @staticmethod
@@ -75,7 +75,6 @@ class RiotAPI:
                                     before = before.strip()
                                     after = after.strip()
 
-                                    # Analiza zmiany liczbowej (opcjonalna logika do dodania emoji)
                                     emoji = "⚖️"
                                     try:
                                         before_val = float(''.join(c for c in before if (c.isdigit() or c == '.' or c == '-')))
@@ -87,7 +86,8 @@ class RiotAPI:
                                     except:
                                         pass
 
-                                    ability_changes.append(f"{emoji} **{ability_name}**:\n`{before} ⇒ {after}`")
+                                    ability_changes.append(f"{emoji} **{ability_name}**:
+`{before} ⇒ {after}`")
                     sibling = sibling.find_next_sibling()
 
                 if ability_changes:
@@ -98,7 +98,8 @@ class RiotAPI:
             return changes
 
         changes = extract_changes_with_champions(soup)
-        return "\n".join(changes) if changes else None
+        return "
+".join(changes) if changes else None
 
 # --- Cykliczne sprawdzanie patcha ---
 
@@ -113,4 +114,50 @@ async def check_patches():
             channel = bot.get_channel(CHANNEL_ID)
             if channel:
                 await channel.send(f"📢 Nowy patch **{version}** dostępny!")
-                chunks =
+                chunks = [data[i:i+2000] for i in range(0, len(data), 2000)]
+                for chunk in chunks:
+                    await channel.send(chunk)
+
+# --- Event: on_ready ---
+
+@bot.event
+async def on_ready():
+    print(f"Zalogowano jako {bot.user}")
+    if not check_patches.is_running():
+        check_patches.start()
+
+# --- Komendy ---
+
+@bot.command()
+async def ping(ctx):
+    await ctx.send("Pong!")
+
+@bot.command()
+async def patch(ctx):
+    version = RiotAPI.get_latest_patch()
+    if not version:
+        await ctx.send("❌ Nie udało się pobrać wersji patcha.")
+        return
+
+    data = RiotAPI.get_patch_data(version)
+    if not data:
+        await ctx.send("❌ Nie udało się pobrać danych patcha.")
+        return
+
+    await ctx.send(f"📢 Nowy patch **{version}** dostępny!")
+    chunks = [data[i:i+2000] for i in range(0, len(data), 2000)]
+    for chunk in chunks:
+        await ctx.send(chunk)
+
+# --- Keep-alive server for Render ---
+
+app = Flask(__name__)
+
+@app.route('/')
+def home():
+    return "Bot is alive."
+
+if __name__ == '__main__':
+    port = int(os.environ.get("PORT", 5000))
+    Thread(target=lambda: app.run(host='0.0.0.0', port=port)).start()
+    bot.run(TOKEN)
