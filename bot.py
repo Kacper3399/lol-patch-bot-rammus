@@ -119,7 +119,7 @@ async def on_ready():
 # --- Komendy ---
 @bot.command()
 async def ping(ctx):
-    await ctx.send("Pong!")
+    await ctx.send("Pong!!")
 
 @bot.command()
 async def patch(ctx):
