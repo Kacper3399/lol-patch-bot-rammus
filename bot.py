@@ -25,7 +25,7 @@ class RiotAPI:
     def get_latest_patch():
         try:
             versions = requests.get(f"{DATA_DRAGON_URL}/api/versions.json").json()
-            return versions[0]  # przykład: "14.9.1"
+            return versions[0]
         except Exception as e:
             print(f"Błąd pobierania wersji patcha: {e}")
             return None
@@ -34,7 +34,7 @@ class RiotAPI:
     def get_patch_data(version):
         try:
             major, minor = version.split('.')[:2]
-            season_number = datetime.now().year - 2000  # np. 2025 → 25
+            season_number = datetime.now().year - 2000
             patch_url = f"https://www.leagueoflegends.com/en-us/news/game-updates/patch-{season_number}-{int(minor):02d}-notes/"
         except Exception as e:
             print(f"Nieprawidłowy format wersji: {version} | {e}")
@@ -51,37 +51,35 @@ class RiotAPI:
 
         soup = BeautifulSoup(response.text, 'html.parser')
 
-        # Funkcja do wyciągania zmian liczb i bohatera
+        # --- Poprawiona funkcja wyciągania zmian ---
         def extract_changes_with_champions(soup):
             changes = []
+            sections = soup.find_all('h3', class_='change-title')
+            for section in sections:
+                champion_name = section.get_text(strip=True).split('@')[0].strip()
+                content = []
+                next_sibling = section.find_next_sibling()
+                while next_sibling and next_sibling.name != 'h3':
+                    if next_sibling.name == 'h4':
+                        ability_name = next_sibling.get_text(strip=True)
+                        ul = next_sibling.find_next_sibling('ul')
+                        if ul:
+                            items = ul.find_all('li')
+                            for item in items:
+                                change_text = item.get_text(strip=True)
+                                if '⇒' in change_text:
+                                    before, after = change_text.split('⇒')
+                                    before = before.strip()
+                                    after = after.strip()
+                                    content.append(f"**{ability_name}**: {before} ⇒ {after}")
+                    next_sibling = next_sibling.find_next_sibling()
 
-            # Szukamy wszystkich sekcji z informacjami o bohaterach
-            for champion_section in soup.find_all('h3', class_='change-title'):
-                champion_name = champion_section.get_text(strip=True).split('@')[0].strip()
-
-                # Sprawdzamy, czy mamy nazwę bohatera
-                if champion_name:
-                    # Zbieramy zmiany dotyczące tego bohatera
-                    ability_changes = []
-                    for ability_section in champion_section.find_all_next('h4', class_='change-detail-title ability-title'):
-                        ability_name = ability_section.get_text(strip=True).replace(' - ', '')
-
-                        list_items = ability_section.find_next('ul').find_all('li')
-                        for item in list_items:
-                            change_text = item.get_text(strip=True)
-                            if '⇒' in change_text:  # Znaleziono zmianę
-                                before, after = change_text.split('⇒')
-                                before = before.strip()
-                                after = after.strip()
-                                ability_changes.append(f"{ability_name}: {before} ⇒ {after}")
-
-                    if ability_changes:
-                        changes.append(f"Zmiany dla {champion_name}:")
-                        changes.extend(ability_changes)
-
+                if content:
+                    changes.append(f"**Zmiany dla {champion_name}:**")
+                    changes.extend(content)
+                    changes.append("")  # pusta linia dla czytelności
             return changes
 
-        # Wyciąganie zmian
         changes = extract_changes_with_champions(soup)
         return "\n".join(changes) if changes else None
 
@@ -97,7 +95,6 @@ async def check_patches():
             channel = bot.get_channel(CHANNEL_ID)
             if channel:
                 await channel.send(f"📢 Nowy patch **{version}** dostępny!")
-                # Split the data into chunks of 2000 characters
                 chunks = [data[i:i+2000] for i in range(0, len(data), 2000)]
                 for chunk in chunks:
                     await channel.send(chunk)
@@ -128,7 +125,6 @@ async def patch(ctx):
 
     await ctx.send(f"📢 Nowy patch **{version}** dostępny!")
 
-    # Dzielenie na segmenty po 2000 znaków
     chunks = [data[i:i+2000] for i in range(0, len(data), 2000)]
     for chunk in chunks:
         await ctx.send(chunk)
@@ -141,7 +137,6 @@ def home():
     return "Bot is alive."
 
 if __name__ == '__main__':
-    # Ustawienie portu dla Render.com
     port = int(os.environ.get("PORT", 5000))
     Thread(target=lambda: app.run(host='0.0.0.0', port=port)).start()
     bot.run(TOKEN)
