@@ -75,7 +75,7 @@ class RiotAPI:
                     next_sibling = next_sibling.find_next_sibling()
 
                 if content:
-                    changes.append(f"##**{champion_name}:**")
+                    changes.append(f"**{champion_name}:**")
                     changes.append("")  # pusta linia dla czytelności
                     changes.extend(content)
                     changes.append("")  # pusta linia dla czytelności
@@ -96,7 +96,7 @@ async def check_patches():
             last_patch_version = version
             channel = bot.get_channel(CHANNEL_ID)
             if channel:
-                await channel.send(f"###New patch **{version}** !")
+                await channel.send(f"New patch **{version}** !")
                 chunks = [data[i:i+2000] for i in range(0, len(data), 2000)]
                 for chunk in chunks:
                     await channel.send(chunk)
@@ -125,7 +125,7 @@ async def patch(ctx):
         await ctx.send("❌ Patch not found")
         return
 
-    await ctx.send(f"###New patch **{version}** !")
+    await ctx.send(f"New patch **{version}** !")
 
     chunks = [data[i:i+2000] for i in range(0, len(data), 2000)]
     for chunk in chunks:
